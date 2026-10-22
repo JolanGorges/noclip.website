@@ -70,6 +70,7 @@ import * as Scenes_HalfLife2LostCoast from './SourceEngine/Scenes_HalfLife2LostC
 import * as Scenes_HalfLife2Ep1 from './SourceEngine/Scenes_HalfLife2Ep1.js';
 import * as Scenes_HalfLife2Ep2 from './SourceEngine/Scenes_HalfLife2Ep2.js';
 import * as Scenes_NfsMostWanted from './NeedForSpeedMostWanted/scenes.js';
+import * as Scenes_MedalOfHonorHeroes2 from './MedalOfHonorHeroes2/scenes.js';
 import * as Scenes_TeamFortress2 from './SourceEngine/Scenes_TeamFortress2.js';
 import * as Scenes_Left4Dead2 from './SourceEngine/Scenes_Left4Dead2.js';
 import * as Scenes_Portal from './SourceEngine/Scenes_Portal.js';
@@ -151,6 +152,7 @@ const sceneGroups: (string | SceneGroup)[] = [
     Scenes_MarioKartWii.sceneGroup,
     Scenes_KirbysReturnToDreamLand.sceneGroup,
     Scenes_Klonoa.sceneGroup,
+    Scenes_MedalOfHonorHeroes2.sceneGroup,
     Scenes_Zelda_SkywardSword.sceneGroup,
     Scenes_Okami.sceneGroup,
     Scenes_SuperMarioGalaxy1.sceneGroup,
