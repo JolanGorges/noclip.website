@@ -283,6 +283,13 @@ const sceneGroups: (string | SceneGroup)[] = [
     Scenes_KingdomHeartsBBS.sceneGroup,
 ];
 
+const onlySceneGroups: string | undefined = import.meta.env.PUBLIC_SCENE_GROUPS;
+if (onlySceneGroups) {
+    const keep = new Set(onlySceneGroups.split(','));
+    const kept = sceneGroups.filter((g) => typeof g !== 'string' && keep.has(g.id));
+    sceneGroups.splice(0, sceneGroups.length, ...kept);
+}
+
 enum SaveStatesAction {
     Load,
     LoadDefault,
