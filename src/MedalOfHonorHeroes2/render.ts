@@ -367,7 +367,7 @@ export class MOHH2Renderer implements SceneGfx {
             forEachParticle(e, this.time, (p) => {
                 if (n >= range.capacity)
                     return;
-                const c = Math.cos(p.rotation), s = Math.sin(p.rotation), h = p.size / 2;
+                const c = Math.cos(p.rotation), s = Math.sin(p.rotation), h = p.size;
                 let o = (range.firstQuad + n) * 4 * VERTEX_FLOATS;
                 for (const [cx, cy, u, w] of corners) {
                     v.set([p.position[0], p.position[1], p.position[2], p.color[0] / 2, p.color[1] / 2, p.color[2] / 2, p.color[3] / 2, u, w,
