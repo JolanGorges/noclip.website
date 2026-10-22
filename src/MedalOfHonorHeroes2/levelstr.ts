@@ -52,6 +52,7 @@ const enum RecordType {
     PickupModel = 0x9C43602F,
     Weapon = 0x7638FD53,
     Billboard = 0x8724D2D2,
+    LevelRoot = 0x26ED4DC8,
 }
 
 const enum FieldHash {
@@ -277,4 +278,39 @@ export function resolveBillboards(records: StrRecord[], placements: Placement[])
         });
     }
     return out;
+}
+
+export interface LevelFog {
+    enabled: boolean;
+    start: number;
+    end: number;
+    onSky: boolean;
+    color: [number, number, number];
+}
+
+const enum FogColorField {
+    Red = 0x68988A2D,
+    Green = 0x18F27EA2,
+    Blue = 0x752F9A49,
+}
+
+export function parseLevelFog(records: StrRecord[]): LevelFog | null {
+    const root = records.find((r) => r.type === RecordType.LevelRoot);
+    if (root === undefined)
+        return null;
+    const fields = fieldValues(root);
+    const value = (hash: number, fallback: number) => {
+        const f = fields.get(hash);
+        if (f === undefined)
+            return fallback;
+        const v = f.data.createDataView();
+        return f.type === 1 ? v.getFloat32(0) : v.getInt32(0);
+    };
+    return {
+        enabled: value(nameHash('FogEnabled'), 0) !== 0,
+        start: value(nameHash('FogStart'), 0),
+        end: value(nameHash('FogEnd'), 1e6),
+        onSky: value(nameHash('FogOnSky'), 0) !== 0,
+        color: [value(FogColorField.Red, 0) / 255, value(FogColorField.Green, 0) / 255, value(FogColorField.Blue, 0) / 255],
+    };
 }

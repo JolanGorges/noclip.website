@@ -1,11 +1,11 @@
 import { mat4, vec3 } from "gl-matrix";
 import { MathConstants } from "../MathHelpers.js";
 import { Camera, CameraController } from "../Camera.js";
-import { White } from "../Color.js";
+import { colorNewFromRGBA, White } from "../Color.js";
 import { createBufferFromData } from "../gfx/helpers/BufferHelpers.js";
 import { setAttachmentStateSimple } from "../gfx/helpers/GfxMegaStateDescriptorHelpers.js";
 import { GfxShaderLibrary } from "../gfx/helpers/GfxShaderLibrary.js";
-import { makeBackbufferDescSimple, standardFullClearRenderPassDescriptor } from "../gfx/helpers/RenderGraphHelpers.js";
+import { makeAttachmentClearDescriptor, makeBackbufferDescSimple, standardFullClearRenderPassDescriptor } from "../gfx/helpers/RenderGraphHelpers.js";
 import { makeSolidColorTexture2D } from "../gfx/helpers/TextureHelpers.js";
 import { fillMatrix4x4, fillVec4 } from "../gfx/helpers/UniformBufferHelpers.js";
 import { GfxBlendFactor, GfxBlendMode, GfxBuffer, GfxBufferFrequencyHint, GfxBufferUsage, GfxCullMode, GfxDevice, GfxFormat, GfxInputLayout, GfxMipFilterMode, GfxProgram, GfxSampler, GfxTexFilterMode, GfxTexture, GfxVertexBufferFrequency, GfxWrapMode } from "../gfx/platform/GfxPlatform.js";
@@ -20,6 +20,9 @@ import { FakeTextureHolder } from "../TextureHolder.js";
 import * as UI from "../ui.js";
 import { SceneGfx, Texture, ViewerRenderInput } from "../viewer.js";
 import { DrawKind, DrawRange, GeometryBuilder, VERTEX_FLOATS } from "./geometry.js";
+import { LevelFog } from "./levelstr.js";
+import { Emitter, forEachParticle, maxParticles } from "./particles.js";
+import { recordTextureName } from "./textures.js";
 
 class MOHH2Program extends DeviceProgram {
     public static a_Position = 0;
@@ -39,6 +42,8 @@ layout(std140) uniform ub_SceneParams {
     vec4 u_CameraPos;
     vec4 u_CameraRight;
     vec4 u_CameraUp;
+    vec4 u_Fog;
+    vec4 u_FogColor;
 };
 
 layout(std140) uniform ub_DrawParams {
@@ -65,6 +70,7 @@ layout(location = ${MOHH2Program.a_TexCoord1}) in vec2 a_TexCoord1;
 out vec4 v_Color;
 out vec2 v_TexCoord0;
 out vec2 v_TexCoord1;
+out vec3 v_WorldPosition;
 
 void main() {
     vec3 t_Position = a_Position;
@@ -77,7 +83,7 @@ void main() {
             t_Up = vec3(0.0, 1.0, 0.0);
             t_Right = normalize(cross(t_Up, t_ToCamera));
         }
-        float t_Pull = min(u_DrawBillboard.x + length(a_TexCoord1), t_Distance * 0.9) / max(t_Distance, 1e-3);
+        float t_Pull = u_DrawBillboard.w > 0.5 ? 0.0 : min(u_DrawBillboard.x + length(a_TexCoord1), t_Distance * 0.9) / max(t_Distance, 1e-3);
         t_Position = a_Position + t_ToCamera * t_Pull + (t_Right * a_TexCoord1.x + t_Up * a_TexCoord1.y) * (1.0 - t_Pull);
         t_Fade = clamp((t_Distance - u_DrawBillboardFade.x) / max(u_DrawBillboardFade.y - u_DrawBillboardFade.x, 1e-3), 0.0, 1.0);
         t_Fade *= clamp((u_DrawBillboardFade.w - t_Distance) / max(u_DrawBillboardFade.w - u_DrawBillboardFade.z, 1e-3), 0.0, 1.0);
@@ -91,6 +97,7 @@ void main() {
         t_Position.xz = u_DrawAnim.xz + vec2(c * t_Offset.x - s * t_Offset.y, s * t_Offset.x + c * t_Offset.y);
     }
     gl_Position = UnpackMatrix(u_ClipFromWorld) * vec4(t_Position, 1.0);
+    v_WorldPosition = t_Position;
     v_Color = vec4(a_Color.rgb, a_Color.a * t_Fade);
     v_TexCoord0 = a_TexCoord0 + u_DrawUV.xy;
     v_TexCoord1 = a_TexCoord1;
@@ -103,11 +110,19 @@ ${MOHH2Program.Common}
 in vec4 v_Color;
 in vec2 v_TexCoord0;
 in vec2 v_TexCoord1;
+in vec3 v_WorldPosition;
+
+float FogAmount() {
+    if (u_Fog.z < 0.5 || (u_DrawMisc.w > 0.5 && u_Fog.w < 0.5))
+        return 0.0;
+    float t_Distance = distance(v_WorldPosition, u_CameraPos.xyz);
+    return clamp((t_Distance - u_Fog.x) / max(u_Fog.y - u_Fog.x, 1e-3), 0.0, 1.0);
+}
 
 void main() {
     vec4 t_Color = texture(SAMPLER_2D(u_TextureBase), v_TexCoord0);
     if (u_DrawBillboard.z > 0.5) {
-        gl_FragColor = vec4(t_Color.rgb * v_Color.rgb * 2.0, t_Color.a * v_Color.a * 2.0);
+        gl_FragColor = vec4(t_Color.rgb * v_Color.rgb * 2.0, t_Color.a * v_Color.a * 2.0 * (1.0 - FogAmount()));
         return;
     }
     if (u_DrawMisc.z > 0.5)
@@ -120,6 +135,7 @@ void main() {
         t_Color.rgb *= texture(SAMPLER_2D(u_TextureLight), v_TexCoord1).rgb * u_SceneMisc.z;
     if (t_Color.a < u_DrawMisc.y)
         discard;
+    t_Color.rgb = mix(t_Color.rgb, u_FogColor.rgb, FogAmount());
     gl_FragColor = t_Color;
 }
 `;
@@ -181,6 +197,10 @@ export class MOHH2Renderer implements SceneGfx {
     private translucentOrder: Material[];
     private cameraPosition = vec3.create();
     private time = 0;
+    private particleRanges: { firstQuad: number, capacity: number }[] = [];
+    private particleVertices: Float32Array | null = null;
+    private particleVertexBuffer: GfxBuffer | null = null;
+    private particleIndexBuffer: GfxBuffer | null = null;
     private center: vec3;
     private size: number;
 
@@ -190,11 +210,13 @@ export class MOHH2Renderer implements SceneGfx {
     public showSkybox = true;
     public showProps = true;
     public showBillboards = true;
+    public useFog = true;
+    public showParticles = true;
     public showBase = true;
     public showCells = true;
     public lightmapScale = 1.5;
 
-    constructor(sceneContext: SceneContext, geometry: GeometryBuilder, textureInputs: Map<string, TextureInputGX>, alphaClasses: Map<string, AlphaClass>, private spawn: number[] | null) {
+    constructor(sceneContext: SceneContext, geometry: GeometryBuilder, textureInputs: Map<string, TextureInputGX>, alphaClasses: Map<string, AlphaClass>, private spawn: number[] | null, private fog: LevelFog | null, private emitters: Emitter[] = []) {
         const device = sceneContext.device;
         this.renderHelper = new GfxRenderHelper(device, sceneContext);
         const cache = this.renderHelper.renderCache;
@@ -224,6 +246,8 @@ export class MOHH2Renderer implements SceneGfx {
         this.whiteTexture = makeSolidColorTexture2D(device, White);
 
         const used = usedTextureNames(geometry);
+        for (const e of emitters)
+            used.add(recordTextureName(e.texture));
         const viewerTextures: Texture[] = [];
         for (const name of [...used].sort()) {
             const input = textureInputs.get(name);
@@ -235,6 +259,7 @@ export class MOHH2Renderer implements SceneGfx {
         }
         this.textureHolder = new FakeTextureHolder(viewerTextures);
 
+        this.createParticleBuffers(device);
         this.materials = geometry.draws.map((draw) => {
             const alphaTexture = draw.maskTexture ?? draw.baseTexture;
             const alpha = alphaTexture !== null ? alphaClasses.get(alphaTexture) ?? AlphaClass.Opaque : AlphaClass.Opaque;
@@ -291,6 +316,14 @@ export class MOHH2Renderer implements SceneGfx {
         cellLayer.onchanged = () => { this.showCells = cellLayer.checked; };
         panel.contents.appendChild(cellLayer.elem);
 
+        const particles = new UI.Checkbox('Particles', this.showParticles);
+        particles.onchanged = () => { this.showParticles = particles.checked; };
+        panel.contents.appendChild(particles.elem);
+
+        const fogToggle = new UI.Checkbox('Fog', this.useFog);
+        fogToggle.onchanged = () => { this.useFog = fogToggle.checked; };
+        panel.contents.appendChild(fogToggle.elem);
+
         const billboards = new UI.Checkbox('Light Glows', this.showBillboards);
         billboards.onchanged = () => { this.showBillboards = billboards.checked; };
         panel.contents.appendChild(billboards.elem);
@@ -304,6 +337,74 @@ export class MOHH2Renderer implements SceneGfx {
         panel.contents.appendChild(lightmapScale.elem);
 
         return [panel];
+    }
+
+    private createParticleBuffers(device: GfxDevice): void {
+        let quads = 0;
+        for (const e of this.emitters) {
+            this.particleRanges.push({ firstQuad: quads, capacity: maxParticles(e) });
+            quads += maxParticles(e);
+        }
+        if (quads === 0)
+            return;
+        this.particleVertices = new Float32Array(quads * 4 * VERTEX_FLOATS);
+        this.particleVertexBuffer = createBufferFromData(device, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Dynamic, this.particleVertices.buffer);
+        const indices = new Uint32Array(quads * 6);
+        for (let q = 0; q < quads; q++)
+            indices.set([4 * q, 4 * q + 1, 4 * q + 2, 4 * q, 4 * q + 2, 4 * q + 3], 6 * q);
+        this.particleIndexBuffer = createBufferFromData(device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, indices.buffer);
+    }
+
+    private submitParticles(device: GfxDevice): void {
+        if (this.particleVertices === null || this.particleVertexBuffer === null || this.particleIndexBuffer === null || !this.showParticles)
+            return;
+        const v = this.particleVertices;
+        const corners = [[-1, -1, 0, 1], [1, -1, 1, 1], [1, 1, 1, 0], [-1, 1, 0, 0]];
+        const counts: number[] = [];
+        this.emitters.forEach((e, i) => {
+            const range = this.particleRanges[i];
+            let n = 0;
+            forEachParticle(e, this.time, (p) => {
+                if (n >= range.capacity)
+                    return;
+                const c = Math.cos(p.rotation), s = Math.sin(p.rotation), h = p.size / 2;
+                let o = (range.firstQuad + n) * 4 * VERTEX_FLOATS;
+                for (const [cx, cy, u, w] of corners) {
+                    v.set([p.position[0], p.position[1], p.position[2], p.color[0] / 2, p.color[1] / 2, p.color[2] / 2, p.color[3] / 2, u, w,
+                        (cx * c - cy * s) * h, (cx * s + cy * c) * h], o);
+                    o += VERTEX_FLOATS;
+                }
+                n++;
+            });
+            counts.push(n);
+        });
+        device.uploadBufferData(this.particleVertexBuffer, 0, new Uint8Array(v.buffer));
+
+        this.emitters.forEach((e, i) => {
+            if (counts[i] === 0)
+                return;
+            const texture = this.textures.get(recordTextureName(e.texture));
+            if (texture === undefined)
+                return;
+            const renderInst = this.renderHelper.renderInstManager.newRenderInst();
+            renderInst.setVertexInput(this.inputLayout, [{ buffer: this.particleVertexBuffer!, byteOffset: 0 }], { buffer: this.particleIndexBuffer!, byteOffset: 0 });
+            renderInst.setSamplerBindings(0, [
+                { gfxTexture: texture, gfxSampler: this.clampSampler },
+                { gfxTexture: this.whiteTexture, gfxSampler: this.clampSampler },
+                { gfxTexture: this.whiteTexture, gfxSampler: this.clampSampler },
+            ]);
+            const params = renderInst.allocateUniformBufferF32(MOHH2Program.ub_DrawParams, 20);
+            fillVec4(params, 0, 0, 1 / 255, 0, 0);
+            fillVec4(params, 4, 0, 0, 0, 0);
+            fillVec4(params, 8, 0, 0, 0, 0);
+            fillVec4(params, 12, 0, 0, 1e6, 1e6 + 1);
+            fillVec4(params, 16, 0, 0, 1, 1);
+            renderInst.setDrawCount(counts[i] * 6, this.particleRanges[i].firstQuad * 6);
+            const megaState = renderInst.getMegaStateFlags();
+            megaState.depthWrite = false;
+            setAttachmentStateSimple(megaState, { blendMode: GfxBlendMode.Add, blendSrcFactor: GfxBlendFactor.SrcAlpha, blendDstFactor: e.additive ? GfxBlendFactor.One : GfxBlendFactor.OneMinusSrcAlpha });
+            this.translucentList.submitRenderInst(renderInst);
+        });
     }
 
     private isVisible(d: DrawRange): boolean {
@@ -361,7 +462,7 @@ export class MOHH2Renderer implements SceneGfx {
         template.setMegaStateFlags({ cullMode: GfxCullMode.None });
 
         let offs = 0;
-        const scene = template.allocateUniformBufferF32(MOHH2Program.ub_SceneParams, 32);
+        const scene = template.allocateUniformBufferF32(MOHH2Program.ub_SceneParams, 40);
         offs += fillMatrix4x4(scene, offs, viewerInput.camera.clipFromWorldMatrix);
         offs += fillVec4(scene, offs, this.useVertexColors ? 1 : 0, this.useLightmaps ? 1 : 0, this.lightmapScale, viewerInput.time / 1000);
         mat4.getTranslation(this.cameraPosition, viewerInput.camera.worldMatrix);
@@ -369,6 +470,9 @@ export class MOHH2Renderer implements SceneGfx {
         const w = viewerInput.camera.worldMatrix;
         offs += fillVec4(scene, offs, w[0], w[1], w[2], 0);
         offs += fillVec4(scene, offs, w[4], w[5], w[6], 0);
+        const fog = this.fog;
+        offs += fillVec4(scene, offs, fog?.start ?? 0, fog?.end ?? 1, fog !== null && fog.enabled && this.useFog ? 1 : 0, fog?.onSky ? 1 : 0);
+        offs += fillVec4(scene, offs, fog?.color[0] ?? 0, fog?.color[1] ?? 0, fog?.color[2] ?? 0, 1);
 
         for (const m of this.materials) {
             if (!this.isVisible(m.draw))
@@ -388,10 +492,12 @@ export class MOHH2Renderer implements SceneGfx {
             if (this.isVisible(m.draw))
                 this.translucentList.submitRenderInst(this.newDrawInst(m, false));
 
+        this.submitParticles(device);
         renderInstManager.popTemplate();
 
         const builder = this.renderHelper.renderGraph.newGraphBuilder();
-        const mainColorDesc = makeBackbufferDescSimple(GfxrAttachmentSlot.Color0, viewerInput, standardFullClearRenderPassDescriptor);
+        const clearColor = colorNewFromRGBA(0.02, 0.02, 0.02, 1);
+        const mainColorDesc = makeBackbufferDescSimple(GfxrAttachmentSlot.Color0, viewerInput, makeAttachmentClearDescriptor(clearColor));
         const mainDepthDesc = makeBackbufferDescSimple(GfxrAttachmentSlot.DepthStencil, viewerInput, standardFullClearRenderPassDescriptor);
         const mainColorTargetID = builder.createRenderTargetID(mainColorDesc, 'Main Color');
         const mainDepthTargetID = builder.createRenderTargetID(mainDepthDesc, 'Main Depth');
@@ -425,6 +531,10 @@ export class MOHH2Renderer implements SceneGfx {
 
     public destroy(device: GfxDevice): void {
         this.renderHelper.destroy();
+        if (this.particleVertexBuffer !== null)
+            device.destroyBuffer(this.particleVertexBuffer);
+        if (this.particleIndexBuffer !== null)
+            device.destroyBuffer(this.particleIndexBuffer);
         device.destroyBuffer(this.vertexBuffer);
         device.destroyBuffer(this.indexBuffer);
         device.destroyTexture(this.whiteTexture);

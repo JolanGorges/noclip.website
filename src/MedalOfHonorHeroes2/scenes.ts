@@ -3,9 +3,10 @@ import { SceneContext, SceneDesc, SceneGroup } from "../SceneBase.js";
 import { SceneGfx } from "../viewer.js";
 import { buildLevelGeometry } from "./geometry.js";
 import { classifyTextureAlpha, MOHH2Renderer, usedTextureNames } from "./render.js";
-import { loadSkybox, parseEntities, parseStrRecords, resolveBillboards, resolvePlacedModels } from "./levelstr.js";
+import { loadSkybox, parseEntities, parseLevelFog, parseStrRecords, resolveBillboards, resolvePlacedModels } from "./levelstr.js";
 import { parseRez } from "./rez.js";
-import { parseLevelTextures } from "./textures.js";
+import { parseLevelTextures, recordTextureName } from "./textures.js";
+import { resolveEmitters } from "./particles.js";
 
 const pathBase = `MedalOfHonorHeroes2`;
 
@@ -25,9 +26,13 @@ class MOHH2SceneDesc implements SceneDesc {
         const props = resolvePlacedModels(records, entities).map(({ placement, objects }) => ({ objects, matrix: placement.matrix, spin: placement.className === 'WeaponPowerup' }));
         const geometry = buildLevelGeometry(files, loadSkybox(records), props, resolveBillboards(records, entities));
         const textures = parseLevelTextures(records);
-        const alphaClasses = await classifyTextureAlpha(textures, usedTextureNames(geometry));
+        const emitters = resolveEmitters(records, entities);
+        const used = usedTextureNames(geometry);
+        for (const e of emitters)
+            used.add(recordTextureName(e.texture));
+        const alphaClasses = await classifyTextureAlpha(textures, used);
         const player = entities.find((e) => e.className === 'Player');
-        return new MOHH2Renderer(context, geometry, textures, alphaClasses, player !== undefined ? player.matrix : null);
+        return new MOHH2Renderer(context, geometry, textures, alphaClasses, player !== undefined ? player.matrix : null, parseLevelFog(records), emitters);
     }
 }
 
