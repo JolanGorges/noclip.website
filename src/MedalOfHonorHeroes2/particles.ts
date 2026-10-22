@@ -31,6 +31,7 @@ export interface Emitter {
     rotAccBase: number;
     rotAccVariance: number;
     colorKeys: { time: number, color: [number, number, number, number] }[];
+    tint: [number, number, number, number];
     fadeIn: number;
     fadeOut: number;
     scale: number;
@@ -91,14 +92,15 @@ function lionToEmitter(m: Map<string, string>, matrix: number[], texture: number
         posBase: vec(m, 'POS_BASE'), posVariance: vec(m, 'POS_VARIANCE'),
         velBase: vec(m, 'VEL_BASE'), velVariance: vec(m, 'VEL_VARIANCE'),
         accBase: vec(m, 'ACC_BASE'), accVariance: vec(m, 'ACC_VARIANCE'),
-        sizeBase: vec(m, 'SIZEXYZ_BASE')[0], sizeVariance: vec(m, 'SIZEXYZ_VARIANCE')[0],
-        sizeVelBase: vec(m, 'SIZEXYZ_VEL_BASE')[0], sizeVelVariance: vec(m, 'SIZEXYZ_VEL_VARIANCE')[0],
-        sizeAccBase: vec(m, 'SIZEXYZ_ACC_BASE')[0], sizeAccVariance: vec(m, 'SIZEXYZ_ACC_VARIANCE')[0],
+        sizeBase: vec(m, 'SIZEXYZ_BASE')[1], sizeVariance: vec(m, 'SIZEXYZ_VARIANCE')[1],
+        sizeVelBase: vec(m, 'SIZEXYZ_VEL_BASE')[1], sizeVelVariance: vec(m, 'SIZEXYZ_VEL_VARIANCE')[1],
+        sizeAccBase: vec(m, 'SIZEXYZ_ACC_BASE')[1], sizeAccVariance: vec(m, 'SIZEXYZ_ACC_VARIANCE')[1],
         rotate: num(m, 'DO_ROTATE') === 1,
         rotBase: vec(m, 'ROTXYZ_BASE')[2], rotVariance: vec(m, 'ROTXYZ_VARIANCE')[2],
         rotVelBase: vec(m, 'ROTXYZ_VEL_BASE')[2], rotVelVariance: vec(m, 'ROTXYZ_VEL_VARIANCE')[2],
         rotAccBase: vec(m, 'ROTXYZ_ACC_BASE')[2], rotAccVariance: vec(m, 'ROTXYZ_ACC_VARIANCE')[2],
         colorKeys,
+        tint: (m.has('RGBA0') ? numbers(m, 'RGBA0', 4).map((c) => c / 255) : [1, 1, 1, 1]) as [number, number, number, number],
         fadeIn: num(m, 'ALPHA_FADEIN'), fadeOut: m.has('ALPHA_FADEOUT') ? num(m, 'ALPHA_FADEOUT') : 1,
         scale: m.has('SCALE') ? num(m, 'SCALE') : 1,
     };
@@ -206,12 +208,12 @@ export function forEachParticle(e: Emitter, time: number, cb: (p: ParticleState)
                 break;
             }
         }
-        let alpha = color[3];
+        let alpha = color[3] * e.tint[3];
         if (e.fadeIn > 0 && u < e.fadeIn)
             alpha *= u / e.fadeIn;
         if (e.fadeOut < 1 && u > e.fadeOut)
             alpha *= (1 - u) / (1 - e.fadeOut);
 
-        cb({ position: vec3.fromValues(scratch[0], scratch[2], -scratch[1]), size, rotation, color: [color[0], color[1], color[2], alpha] });
+        cb({ position: vec3.fromValues(scratch[0], scratch[2], -scratch[1]), size, rotation, color: [color[0] * e.tint[0], color[1] * e.tint[1], color[2] * e.tint[2], alpha] });
     }
 }
