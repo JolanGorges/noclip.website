@@ -96,7 +96,7 @@ function partToEmitter(record: StrRecord, matrix: number[], seed: number): Emitt
     const endScale = named('SizeEndScale', 1);
     const spin = range(value(FieldHash.SpinMin), value(FieldHash.SpinMax));
     const color = (prefix: string): [number, number, number] => ['R', 'G', 'B'].map((c) =>
-        (named(`${prefix}${c}`, 255) + named(`${prefix}Max${c}`, named(`${prefix}${c}`, 255))) / 2 / 255) as [number, number, number];
+        (named(`${prefix}${c}`, 128) + named(`${prefix}Max${c}`, named(`${prefix}${c}`, 128))) / 2 / 128) as [number, number, number];
     const startAlpha = Math.min((named('AlphaStart', 128) + named('AlphaStartMax', named('AlphaStart', 128))) / 2 / 128, 1);
     const endAlpha = Math.min(named('AlphaEnd', 0) / 128, 1);
     const start = color('ColorStart'), end = color('ColorEnd');
