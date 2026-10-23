@@ -119,7 +119,7 @@ function partToEmitter(record: StrRecord, matrix: number[], seed: number): Emitt
         rotBase: 0, rotVariance: Math.PI * 2,
         rotVelBase: spin[0], rotVelVariance: spin[1],
         rotAccBase: 0, rotAccVariance: 0,
-        colorKeys: [{ time: 0, color: [...start, startAlpha] }, { time: 1, color: [...end, fadeOutStart < 1 ? endAlpha : startAlpha] }],
+        colorKeys: [{ time: 0, color: [...start, startAlpha] }, { time: 1, color: [...end, endAlpha] }],
         tint: [1, 1, 1, 1],
         fadeIn: value(FieldHash.FadeInEnd), fadeOut: fadeOutStart,
         scale: 1,
