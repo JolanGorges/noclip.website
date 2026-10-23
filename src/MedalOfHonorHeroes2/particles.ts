@@ -48,13 +48,18 @@ const enum FieldHash {
     Texture = 0x81728B86,
     SourcePath = 0x654F240D,
     Life = 0x28B49F50,
-    AccMinX = 0x8EDB31BA,
-    AccMaxX = 0xCBD97238,
-    AccMinY = 0x41325185,
-    AccMaxY = 0x36356113,
+    AccX = 0x36356113,
+    AccY = 0x41325185,
     AccZ = 0xD83B003F,
-    SpinMin = 0xFE46AF57,
-    SpinMax = 0xECCD4B38,
+    SpinMin = 0x8EDB31BA,
+    SpinMax = 0xCBD97238,
+    SpawnMinX = 0x89419FC1,
+    SpawnMinY = 0xFE46AF57,
+    SpawnMinZ = 0x674FFEED,
+    SpawnMaxX = 0x9BCA7BAE,
+    SpawnMaxY = 0xECCD4B38,
+    SpawnMaxZ = 0x75C41A82,
+    FadeInEnd = 0x806CB369,
 }
 
 const partHash = (name: string) => CRC32.str(name) >>> 0;
@@ -81,8 +86,9 @@ function partToEmitter(record: StrRecord, matrix: number[], seed: number): Emitt
     const velX = range(named('VelMinX'), named('VelMaxX'));
     const velY = range(named('VelMinY'), named('VelMaxY'));
     const velZ = range(named('VelMinZ'), named('VelMaxZ'));
-    const accX = range(value(FieldHash.AccMinX), value(FieldHash.AccMaxX));
-    const accY = range(value(FieldHash.AccMinY), value(FieldHash.AccMaxY));
+    const spawnX = range(value(FieldHash.SpawnMinX), value(FieldHash.SpawnMaxX));
+    const spawnY = range(value(FieldHash.SpawnMinY), value(FieldHash.SpawnMaxY));
+    const spawnZ = range(value(FieldHash.SpawnMinZ), value(FieldHash.SpawnMaxZ));
     const width = range(named('SizeMinWidth', 1), named('SizeMaxWidth', 1));
     const meanWidth = width[0] + width[1] / 2;
     const endScale = named('SizeEndScale', 1);
@@ -93,15 +99,17 @@ function partToEmitter(record: StrRecord, matrix: number[], seed: number): Emitt
     const endAlpha = Math.min(named('AlphaEnd', 0) / 128, 1);
     const start = color('ColorStart'), end = color('ColorEnd');
     const renderType = named('RenderType', 2);
+    const fadeOutStart = named('FadeOutStart', 1);
 
     return {
         matrix, seed, rate,
         texture: texture.view.getUint32(0),
         additive: renderType !== 2,
         lifeBase: life, lifeVariance: 0,
-        posBase: [0, 0, 0], posVariance: [0, 0, 0],
+        posBase: [spawnX[0], spawnZ[0], spawnY[0]], posVariance: [spawnX[1], spawnZ[1], spawnY[1]],
         velBase: [velX[0], velZ[0], velY[0]], velVariance: [velX[1], velZ[1], velY[1]],
-        accBase: [accX[0], value(FieldHash.AccZ), accY[0]], accVariance: [accX[1], 0, accY[1]],
+        // The game moves particles by a * t^2, not a * t^2 / 2.
+        accBase: [2 * value(FieldHash.AccX), 2 * value(FieldHash.AccZ), 2 * value(FieldHash.AccY)], accVariance: [0, 0, 0],
         sizeBase: width[0], sizeVariance: width[1],
         sizeVelBase: meanWidth * (endScale - 1) / life, sizeVelVariance: 0,
         sizeAccBase: 0, sizeAccVariance: 0,
@@ -109,9 +117,9 @@ function partToEmitter(record: StrRecord, matrix: number[], seed: number): Emitt
         rotBase: 0, rotVariance: Math.PI * 2,
         rotVelBase: spin[0], rotVelVariance: spin[1],
         rotAccBase: 0, rotAccVariance: 0,
-        colorKeys: [{ time: 0, color: [...start, startAlpha] }, { time: 1, color: [...end, endAlpha] }],
+        colorKeys: [{ time: 0, color: [...start, startAlpha] }, { time: 1, color: [...end, fadeOutStart < 1 ? endAlpha : startAlpha] }],
         tint: [1, 1, 1, 1],
-        fadeIn: 0, fadeOut: 1,
+        fadeIn: value(FieldHash.FadeInEnd), fadeOut: fadeOutStart,
         scale: 1,
     };
 }
