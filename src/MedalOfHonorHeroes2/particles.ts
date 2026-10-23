@@ -35,6 +35,8 @@ export interface Emitter {
     fadeIn: number;
     fadeOut: number;
     scale: number;
+    // Seconds of particle time per real second.
+    timeScale: number;
     seed: number;
 }
 
@@ -121,6 +123,9 @@ function partToEmitter(record: StrRecord, matrix: number[], seed: number): Emitt
         tint: [1, 1, 1, 1],
         fadeIn: value(FieldHash.FadeInEnd), fadeOut: fadeOutStart,
         scale: 1,
+        // The game advances this effect clock by 2 ticks per 60 Hz frame but converts ticks with
+        // 1 / 59.94, so these effects play at twice real time.
+        timeScale: 2,
     };
 }
 
@@ -180,6 +185,7 @@ function lionToEmitter(m: Map<string, string>, matrix: number[], texture: number
         tint: (m.has('RGBA0') ? numbers(m, 'RGBA0', 4).map((c) => c / 255) : [1, 1, 1, 1]) as [number, number, number, number],
         fadeIn: num(m, 'ALPHA_FADEIN'), fadeOut: m.has('ALPHA_FADEOUT') ? num(m, 'ALPHA_FADEOUT') : 1,
         scale: m.has('SCALE') ? num(m, 'SCALE') : 1,
+        timeScale: 1,
     };
 }
 
@@ -263,7 +269,8 @@ export interface ParticleState {
 
 const scratch = vec3.create();
 
-export function forEachParticle(e: Emitter, time: number, cb: (p: ParticleState) => void): void {
+export function forEachParticle(e: Emitter, realTime: number, cb: (p: ParticleState) => void): void {
+    const time = realTime * e.timeScale;
     const maxLife = e.lifeBase + Math.max(e.lifeVariance, 0);
     const last = Math.floor(time * e.rate);
     const first = Math.max(Math.floor((time - maxLife) * e.rate), last - maxParticles(e) + 1);
