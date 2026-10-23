@@ -8,7 +8,7 @@ import { GfxShaderLibrary } from "../gfx/helpers/GfxShaderLibrary.js";
 import { makeAttachmentClearDescriptor, makeBackbufferDescSimple, standardFullClearRenderPassDescriptor } from "../gfx/helpers/RenderGraphHelpers.js";
 import { makeSolidColorTexture2D } from "../gfx/helpers/TextureHelpers.js";
 import { fillMatrix4x4, fillVec4 } from "../gfx/helpers/UniformBufferHelpers.js";
-import { GfxBlendFactor, GfxBlendMode, GfxBuffer, GfxBufferFrequencyHint, GfxBufferUsage, GfxCullMode, GfxDevice, GfxFormat, GfxInputLayout, GfxMipFilterMode, GfxProgram, GfxSampler, GfxTexFilterMode, GfxTexture, GfxVertexBufferFrequency, GfxWrapMode } from "../gfx/platform/GfxPlatform.js";
+import { GfxBindingLayoutDescriptor, GfxBlendFactor, GfxBlendMode, GfxBuffer, GfxBufferFrequencyHint, GfxBufferUsage, GfxCullMode, GfxDevice, GfxFormat, GfxInputLayout, GfxMipFilterMode, GfxProgram, GfxSampler, GfxSamplerFormatKind, GfxTexFilterMode, GfxTexture, GfxTextureDimension, GfxVertexBufferFrequency, GfxWrapMode } from "../gfx/platform/GfxPlatform.js";
 import { GfxrAttachmentSlot } from "../gfx/render/GfxRenderGraph.js";
 import { GfxRenderHelper } from "../gfx/render/GfxRenderHelper.js";
 import { GfxRenderInstList } from "../gfx/render/GfxRenderInstManager.js";
@@ -83,7 +83,7 @@ void main() {
             t_Up = vec3(0.0, 1.0, 0.0);
             t_Right = normalize(cross(t_Up, t_ToCamera));
         }
-        float t_Pull = u_DrawBillboard.w > 0.5 ? 0.0 : min(u_DrawBillboard.x + length(a_TexCoord1), t_Distance * 0.9) / max(t_Distance, 1e-3);
+        float t_Pull = min(u_DrawBillboard.x + length(a_TexCoord1) * (1.0 - u_DrawBillboard.w), t_Distance * 0.9) / max(t_Distance, 1e-3);
         t_Position = a_Position + t_ToCamera * t_Pull + (t_Right * a_TexCoord1.x + t_Up * a_TexCoord1.y) * (1.0 - t_Pull);
         t_Fade = clamp((t_Distance - u_DrawBillboardFade.x) / max(u_DrawBillboardFade.y - u_DrawBillboardFade.x, 1e-3), 0.0, 1.0);
         t_Fade *= clamp((u_DrawBillboardFade.w - t_Distance) / max(u_DrawBillboardFade.w - u_DrawBillboardFade.z, 1e-3), 0.0, 1.0);
@@ -122,7 +122,18 @@ float FogAmount() {
 void main() {
     vec4 t_Color = texture(SAMPLER_2D(u_TextureBase), v_TexCoord0);
     if (u_DrawBillboard.z > 0.5) {
-        gl_FragColor = vec4(t_Color.rgb * v_Color.rgb * 2.0, t_Color.a * v_Color.a * 2.0 * (1.0 - FogAmount()));
+        float t_Soft = 1.0;
+        if (u_DrawUV.z > 0.0) {
+            // Soft particles: fade out where the sprite gets close to the surface behind it, so big
+            // puffs do not cut straight lines into walls. Depth is reversed with an infinite far
+            // plane, so distance = near / depth.
+            vec2 t_Size = vec2(textureSize(TEXTURE(u_TextureMask), 0));
+            float t_SceneDepth = texture(SAMPLER_2D(u_TextureMask), gl_FragCoord.xy / t_Size).r;
+            float t_SceneDistance = u_DrawUV.w / max(t_SceneDepth, 1e-7);
+            float t_FragDistance = u_DrawUV.w / max(gl_FragCoord.z, 1e-7);
+            t_Soft = clamp((t_SceneDistance - t_FragDistance) / u_DrawUV.z, 0.0, 1.0);
+        }
+        gl_FragColor = vec4(t_Color.rgb * v_Color.rgb * 2.0, t_Color.a * v_Color.a * 2.0 * (1.0 - FogAmount()) * t_Soft);
         return;
     }
     if (u_DrawMisc.z > 0.5)
@@ -142,6 +153,14 @@ void main() {
 }
 
 const PICKUP_SPIN_RADIANS_PER_SECOND = 1.4;
+const PARTICLE_SOFT_DISTANCE = 1.5;
+const NEAR_PLANE = 0.1;
+const SCENE_DEPTH = 'scene-depth';
+const particleBindingLayouts: GfxBindingLayoutDescriptor[] = [{ numUniformBuffers: 2, numSamplers: 3, samplerEntries: [
+    { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float },
+    { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float },
+    { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.UnfilterableFloat },
+] }];
 const PLAYER_EYE_HEIGHT = 1.7;
 const GAME_FOV_Y = 46.83 * MathConstants.DEG_TO_RAD;
 
@@ -185,12 +204,14 @@ export class MOHH2Renderer implements SceneGfx {
     private skyList = new GfxRenderInstList(null);
     private opaqueList = new GfxRenderInstList();
     private translucentList = new GfxRenderInstList(null);
+    private particleList = new GfxRenderInstList(null);
     private program: GfxProgram;
     private inputLayout: GfxInputLayout;
     private vertexBuffer: GfxBuffer;
     private indexBuffer: GfxBuffer;
     private repeatSampler: GfxSampler;
     private clampSampler: GfxSampler;
+    private depthSampler: GfxSampler;
     private whiteTexture: GfxTexture;
     private textures = new Map<string, GfxTexture>();
     private materials: Material[];
@@ -238,6 +259,11 @@ export class MOHH2Renderer implements SceneGfx {
         this.repeatSampler = cache.createSampler({
             minFilter: GfxTexFilterMode.Bilinear, magFilter: GfxTexFilterMode.Bilinear, mipFilter: GfxMipFilterMode.Linear,
             wrapS: GfxWrapMode.Repeat, wrapT: GfxWrapMode.Repeat, maxAnisotropy: 16,
+        });
+        this.depthSampler = cache.createSampler({
+            wrapS: GfxWrapMode.Clamp, wrapT: GfxWrapMode.Clamp,
+            minFilter: GfxTexFilterMode.Point, magFilter: GfxTexFilterMode.Point, mipFilter: GfxMipFilterMode.Nearest,
+            minLOD: 0, maxLOD: 0,
         });
         this.clampSampler = cache.createSampler({
             minFilter: GfxTexFilterMode.Bilinear, magFilter: GfxTexFilterMode.Bilinear, mipFilter: GfxMipFilterMode.Linear,
@@ -388,22 +414,23 @@ export class MOHH2Renderer implements SceneGfx {
                 return;
             const renderInst = this.renderHelper.renderInstManager.newRenderInst();
             renderInst.setVertexInput(this.inputLayout, [{ buffer: this.particleVertexBuffer!, byteOffset: 0 }], { buffer: this.particleIndexBuffer!, byteOffset: 0 });
+            renderInst.setBindingLayouts(particleBindingLayouts);
             renderInst.setSamplerBindings(0, [
                 { gfxTexture: texture, gfxSampler: this.clampSampler },
                 { gfxTexture: this.whiteTexture, gfxSampler: this.clampSampler },
-                { gfxTexture: this.whiteTexture, gfxSampler: this.clampSampler },
+                { gfxTexture: null, gfxSampler: this.depthSampler, lateBinding: SCENE_DEPTH },
             ]);
             const params = renderInst.allocateUniformBufferF32(MOHH2Program.ub_DrawParams, 20);
             fillVec4(params, 0, 0, 1 / 255, 0, 0);
             fillVec4(params, 4, 0, 0, 0, 0);
-            fillVec4(params, 8, 0, 0, 0, 0);
+            fillVec4(params, 8, 0, 0, PARTICLE_SOFT_DISTANCE, NEAR_PLANE);
             fillVec4(params, 12, 0, 0, 1e6, 1e6 + 1);
             fillVec4(params, 16, 0, 0, 1, 1);
             renderInst.setDrawCount(counts[i] * 6, this.particleRanges[i].firstQuad * 6);
             const megaState = renderInst.getMegaStateFlags();
             megaState.depthWrite = false;
             setAttachmentStateSimple(megaState, { blendMode: GfxBlendMode.Add, blendSrcFactor: GfxBlendFactor.SrcAlpha, blendDstFactor: e.additive ? GfxBlendFactor.One : GfxBlendFactor.OneMinusSrcAlpha });
-            this.translucentList.submitRenderInst(renderInst);
+            this.particleList.submitRenderInst(renderInst);
         });
     }
 
@@ -453,7 +480,7 @@ export class MOHH2Renderer implements SceneGfx {
         const renderInstManager = this.renderHelper.renderInstManager;
         if (Math.abs(viewerInput.camera.fovY - Camera.DefaultFovY) < 0.01)
             viewerInput.camera.fovY = GAME_FOV_Y;
-        viewerInput.camera.setClipPlanes(0.1);
+        viewerInput.camera.setClipPlanes(NEAR_PLANE);
         this.time = viewerInput.time / 1000;
         const template = this.renderHelper.pushTemplateRenderInst();
         template.setBindingLayouts([{ numUniformBuffers: 2, numSamplers: 3 }]);
@@ -519,6 +546,17 @@ export class MOHH2Renderer implements SceneGfx {
                 this.translucentList.drawOnPassRenderer(this.renderHelper.renderCache, passRenderer);
             });
         });
+        builder.pushPass((pass) => {
+            pass.setDebugName('Particles');
+            pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, mainColorTargetID);
+            pass.attachRenderTargetID(GfxrAttachmentSlot.DepthStencil, mainDepthTargetID);
+            const depthResolveID = builder.resolveRenderTarget(mainDepthTargetID);
+            pass.attachResolveTexture(depthResolveID);
+            pass.exec((passRenderer, scope) => {
+                this.particleList.resolveLateSamplerBinding(SCENE_DEPTH, { gfxTexture: scope.getResolveTextureForID(depthResolveID), gfxSampler: this.depthSampler });
+                this.particleList.drawOnPassRenderer(this.renderHelper.renderCache, passRenderer);
+            });
+        });
         this.renderHelper.antialiasingSupport.pushPasses(builder, viewerInput, mainColorTargetID);
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
@@ -527,6 +565,7 @@ export class MOHH2Renderer implements SceneGfx {
         this.skyList.reset();
         this.opaqueList.reset();
         this.translucentList.reset();
+        this.particleList.reset();
     }
 
     public destroy(device: GfxDevice): void {
