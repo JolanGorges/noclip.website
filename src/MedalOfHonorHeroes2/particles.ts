@@ -73,6 +73,7 @@ const enum FieldHash {
 }
 
 const partHash = (name: string) => CRC32.str(name) >>> 0;
+const LION_SIZE_FACTOR = 1;  // matched against Dolphin in Sewers
 
 function partToEmitter(record: StrRecord, matrix: number[], seed: number): Emitter | null {
     const fields = new Map<number, { type: number, view: DataView }>();
@@ -188,10 +189,10 @@ function lionToEmitter(m: Map<string, string>, matrix: number[], texture: number
         posBase: vec(m, 'POS_BASE'), posVariance: vec(m, 'POS_VARIANCE'),
         velBase: vec(m, 'VEL_BASE'), velVariance: vec(m, 'VEL_VARIANCE'),
         accBase: vec(m, 'ACC_BASE'), accVariance: vec(m, 'ACC_VARIANCE'),
-        // Lion sizes are full sprite widths; the renderer takes a half-size.
-        sizeBase: vec(m, 'SIZEXYZ_BASE')[1] / 2, sizeVariance: vec(m, 'SIZEXYZ_VARIANCE')[1] / 2,
-        sizeVelBase: vec(m, 'SIZEXYZ_VEL_BASE')[1] / 2, sizeVelVariance: vec(m, 'SIZEXYZ_VEL_VARIANCE')[1] / 2,
-        sizeAccBase: vec(m, 'SIZEXYZ_ACC_BASE')[1] / 2, sizeAccVariance: vec(m, 'SIZEXYZ_ACC_VARIANCE')[1] / 2,
+        // Uniform size (DO_SIZEXYZ = 0) comes from the X column and is a radius, like the renderer's half-size.
+        sizeBase: vec(m, 'SIZEXYZ_BASE')[0] * LION_SIZE_FACTOR, sizeVariance: vec(m, 'SIZEXYZ_VARIANCE')[0] * LION_SIZE_FACTOR,
+        sizeVelBase: vec(m, 'SIZEXYZ_VEL_BASE')[0] * LION_SIZE_FACTOR, sizeVelVariance: vec(m, 'SIZEXYZ_VEL_VARIANCE')[0] * LION_SIZE_FACTOR,
+        sizeAccBase: vec(m, 'SIZEXYZ_ACC_BASE')[0] * LION_SIZE_FACTOR, sizeAccVariance: vec(m, 'SIZEXYZ_ACC_VARIANCE')[0] * LION_SIZE_FACTOR,
         rotate: num(m, 'DO_ROTATE') === 1,
         rotBase: vec(m, 'ROTXYZ_BASE')[2], rotVariance: vec(m, 'ROTXYZ_VARIANCE')[2],
         rotVelBase: vec(m, 'ROTXYZ_VEL_BASE')[2], rotVelVariance: vec(m, 'ROTXYZ_VEL_VARIANCE')[2],
