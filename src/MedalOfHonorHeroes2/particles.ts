@@ -39,6 +39,8 @@ export interface Emitter {
     timeScale: number;
     // Sprite height / width.
     aspect: number;
+    // Only visible where a lamp lights it (the Sewers "light mist"); see the renderer.
+    lampLit: boolean;
     seed: number;
 }
 
@@ -136,6 +138,7 @@ function partToEmitter(record: StrRecord, matrix: number[], seed: number): Emitt
         // 1 / 59.94, so these effects play at twice real time.
         timeScale: 2,
         aspect: meanWidth > 0 ? meanHeight / meanWidth : 1,
+        lampLit: false,
     };
 }
 
@@ -185,9 +188,10 @@ function lionToEmitter(m: Map<string, string>, matrix: number[], texture: number
         posBase: vec(m, 'POS_BASE'), posVariance: vec(m, 'POS_VARIANCE'),
         velBase: vec(m, 'VEL_BASE'), velVariance: vec(m, 'VEL_VARIANCE'),
         accBase: vec(m, 'ACC_BASE'), accVariance: vec(m, 'ACC_VARIANCE'),
-        sizeBase: vec(m, 'SIZEXYZ_BASE')[1], sizeVariance: vec(m, 'SIZEXYZ_VARIANCE')[1],
-        sizeVelBase: vec(m, 'SIZEXYZ_VEL_BASE')[1], sizeVelVariance: vec(m, 'SIZEXYZ_VEL_VARIANCE')[1],
-        sizeAccBase: vec(m, 'SIZEXYZ_ACC_BASE')[1], sizeAccVariance: vec(m, 'SIZEXYZ_ACC_VARIANCE')[1],
+        // Lion sizes are full sprite widths; the renderer takes a half-size.
+        sizeBase: vec(m, 'SIZEXYZ_BASE')[1] / 2, sizeVariance: vec(m, 'SIZEXYZ_VARIANCE')[1] / 2,
+        sizeVelBase: vec(m, 'SIZEXYZ_VEL_BASE')[1] / 2, sizeVelVariance: vec(m, 'SIZEXYZ_VEL_VARIANCE')[1] / 2,
+        sizeAccBase: vec(m, 'SIZEXYZ_ACC_BASE')[1] / 2, sizeAccVariance: vec(m, 'SIZEXYZ_ACC_VARIANCE')[1] / 2,
         rotate: num(m, 'DO_ROTATE') === 1,
         rotBase: vec(m, 'ROTXYZ_BASE')[2], rotVariance: vec(m, 'ROTXYZ_VARIANCE')[2],
         rotVelBase: vec(m, 'ROTXYZ_VEL_BASE')[2], rotVelVariance: vec(m, 'ROTXYZ_VEL_VARIANCE')[2],
@@ -198,6 +202,7 @@ function lionToEmitter(m: Map<string, string>, matrix: number[], texture: number
         scale: m.has('SCALE') ? num(m, 'SCALE') : 1,
         timeScale: 1,
         aspect: 1,
+        lampLit: false,
     };
 }
 
@@ -253,8 +258,10 @@ export function resolveEmitters(records: StrRecord[], placements: Placement[]): 
                 const prefix = (lion.get('TEXTURE') ?? '').slice(0, 4);
                 const texture = (textures.find((t) => t.name === prefix) ?? textures[0]).id;
                 const emitter = lionToEmitter(lion, placement.matrix, texture, index * 64 + k++);
-                if (emitter !== null)
+                if (emitter !== null) {
+                    emitter.lampLit = /light_mist/i.test(leaf);
                     emitters.push(emitter);
+                }
             }
         }
     });

@@ -406,7 +406,7 @@ export class MOHH2Renderer implements SceneGfx {
         this.emitters.forEach((e, i) => {
             const range = this.particleRanges[i];
             let n = 0;
-            const lit = !e.additive && this.particleLights.length > 0;
+            const lit = e.lampLit && this.particleLights.length > 0;
             forEachParticle(e, this.time, (p) => {
                 if (n >= range.capacity)
                     return;

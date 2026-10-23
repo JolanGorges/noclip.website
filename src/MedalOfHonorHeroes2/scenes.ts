@@ -27,8 +27,8 @@ class MOHH2SceneDesc implements SceneDesc {
         const skybox = loadSkybox(records);
         const billboards = resolveBillboards(records, entities);
         const geometry = buildLevelGeometry(files, skybox, props, billboards);
-        // Sewers (map 3): the game lights its smoke, so the mist only shows near the lamps. The lamps
-        // are the light glow billboards; positions converted to noclip space.
+        // Sewers (map 3): the "light mist" only shows where a lamp lights it. The lamps are the light
+        // glow billboards; positions converted to noclip space.
         const indoor = /^[12]_3/.test(this.id);
         const particleLights = indoor ? billboards.map((b) => [b.matrix[9], b.matrix[11], -b.matrix[10]]) : [];
         const textures = parseLevelTextures(records);
