@@ -40,11 +40,80 @@ export interface Emitter {
 
 const enum RecordType {
     Effect = 0xDB93F8AD,
+    EffectPart = 0x472C4C34,
 }
 
 const enum FieldHash {
     Definition = 0x3A6F80DE,
     Texture = 0x81728B86,
+    SourcePath = 0x654F240D,
+    Life = 0x28B49F50,
+    AccMinX = 0x8EDB31BA,
+    AccMaxX = 0xCBD97238,
+    AccMinY = 0x41325185,
+    AccMaxY = 0x36356113,
+    AccZ = 0xD83B003F,
+    SpinMin = 0xFE46AF57,
+    SpinMax = 0xECCD4B38,
+}
+
+const partHash = (name: string) => CRC32.str(name) >>> 0;
+
+function partToEmitter(record: StrRecord, matrix: number[], seed: number): Emitter | null {
+    const fields = new Map<number, { type: number, view: DataView }>();
+    for (const f of parseStrFields(record))
+        fields.set(f.hash, { type: f.type, view: f.data.createDataView() });
+    const value = (hash: number, fallback = 0) => {
+        const f = fields.get(hash);
+        if (f === undefined)
+            return fallback;
+        return f.type === 1 ? f.view.getFloat32(0) : f.view.getInt32(0);
+    };
+    const named = (name: string, fallback = 0) => value(partHash(name), fallback);
+    const texture = fields.get(FieldHash.Texture);
+    const life = value(FieldHash.Life);
+    const delay = Math.max(named('EmitDelay', 1), 1);
+    const rate = named('EmitRate') * 60 / delay;
+    if (texture === undefined || life <= 0 || rate <= 0)
+        return null;
+
+    const range = (min: number, max: number): [number, number] => [min, max - min];
+    const velX = range(named('VelMinX'), named('VelMaxX'));
+    const velY = range(named('VelMinY'), named('VelMaxY'));
+    const velZ = range(named('VelMinZ'), named('VelMaxZ'));
+    const accX = range(value(FieldHash.AccMinX), value(FieldHash.AccMaxX));
+    const accY = range(value(FieldHash.AccMinY), value(FieldHash.AccMaxY));
+    const width = range(named('SizeMinWidth', 1), named('SizeMaxWidth', 1));
+    const meanWidth = width[0] + width[1] / 2;
+    const endScale = named('SizeEndScale', 1);
+    const spin = range(value(FieldHash.SpinMin), value(FieldHash.SpinMax));
+    const color = (prefix: string): [number, number, number] => ['R', 'G', 'B'].map((c) =>
+        (named(`${prefix}${c}`, 255) + named(`${prefix}Max${c}`, named(`${prefix}${c}`, 255))) / 2 / 255) as [number, number, number];
+    const startAlpha = Math.min((named('AlphaStart', 128) + named('AlphaStartMax', named('AlphaStart', 128))) / 2 / 128, 1);
+    const endAlpha = Math.min(named('AlphaEnd', 0) / 128, 1);
+    const start = color('ColorStart'), end = color('ColorEnd');
+    const renderType = named('RenderType', 2);
+
+    return {
+        matrix, seed, rate,
+        texture: texture.view.getUint32(0),
+        additive: renderType !== 2,
+        lifeBase: life, lifeVariance: 0,
+        posBase: [0, 0, 0], posVariance: [0, 0, 0],
+        velBase: [velX[0], velZ[0], velY[0]], velVariance: [velX[1], velZ[1], velY[1]],
+        accBase: [accX[0], value(FieldHash.AccZ), accY[0]], accVariance: [accX[1], 0, accY[1]],
+        sizeBase: width[0], sizeVariance: width[1],
+        sizeVelBase: meanWidth * (endScale - 1) / life, sizeVelVariance: 0,
+        sizeAccBase: 0, sizeAccVariance: 0,
+        rotate: true,
+        rotBase: 0, rotVariance: Math.PI * 2,
+        rotVelBase: spin[0], rotVelVariance: spin[1],
+        rotAccBase: 0, rotAccVariance: 0,
+        colorKeys: [{ time: 0, color: [...start, startAlpha] }, { time: 1, color: [...end, endAlpha] }],
+        tint: [1, 1, 1, 1],
+        fadeIn: 0, fadeOut: 1,
+        scale: 1,
+    };
 }
 
 function parseLion(text: string): Map<string, string>[] {
@@ -124,8 +193,25 @@ export function resolveEmitters(records: StrRecord[], placements: Placement[]): 
             return;
         const leaf = placement.definition.split(/[\\/]/).pop()!.replace(/\.[^.]*$/, '');
         const record = byId.get(CRC32.str(leaf) >>> 0);
-        if (record === undefined || record.type !== RecordType.Effect)
+        if (record === undefined || record.type !== RecordType.Effect) {
+            const prefix = leaf.replace(/^mp_/i, '').toLowerCase() + '_';
+            let k = 0;
+            for (const part of records) {
+                if (part.type !== RecordType.EffectPart)
+                    continue;
+                const path = parseStrFields(part).find((f) => f.hash === FieldHash.SourcePath);
+                if (path === undefined)
+                    continue;
+                const source = new TextDecoder('latin1').decode(path.data.createTypedArray(Uint8Array)).split('\0')[0];
+                const partLeaf = source.split(/[\\/]/).pop()!.toLowerCase();
+                if (!partLeaf.startsWith(prefix))
+                    continue;
+                const emitter = partToEmitter(part, placement.matrix, index * 64 + k++);
+                if (emitter !== null)
+                    emitters.push(emitter);
+            }
             return;
+        }
         const fields = parseStrFields(record);
         const ref = (hash: number) => fields.filter((f) => f.type === 6 && f.hash === hash).map((f) => f.data.createDataView().getUint32(0));
         const textures = ref(FieldHash.Texture).map((id) => ({ id, name: textureName(id) }));
