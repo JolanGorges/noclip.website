@@ -174,9 +174,10 @@ function lionToEmitter(m: Map<string, string>, matrix: number[], texture: number
     if (rate <= 0)
         return null;
     const colorKeys = [{ time: num(m, 'COLOUR_TIME0'), color: numbers(m, 'COLOUR0', 4).map((c) => c / 255) as [number, number, number, number] }];
-    for (let i = 0; i < 3; i++)
+    // DO_COLOURSTEPn switches colour key n on (key 0 is always used).
+    for (let i = 1; i < 4; i++)
         if (num(m, `DO_COLOURSTEP${i}`) === 1)
-            colorKeys.push({ time: num(m, `COLOUR_TIME${i + 1}`), color: numbers(m, `COLOUR${i + 1}`, 4).map((c) => c / 255) as [number, number, number, number] });
+            colorKeys.push({ time: num(m, `COLOUR_TIME${i}`), color: numbers(m, `COLOUR${i}`, 4).map((c) => c / 255) as [number, number, number, number] });
     return {
         matrix, texture, seed, rate,
         additive: (m.get('BLEND_MODE') ?? 'SRCALPHA') !== 'SRCALPHA',
