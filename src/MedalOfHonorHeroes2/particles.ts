@@ -37,6 +37,8 @@ export interface Emitter {
     scale: number;
     // Seconds of particle time per real second.
     timeScale: number;
+    // Sprite height / width.
+    aspect: number;
     seed: number;
 }
 
@@ -62,6 +64,10 @@ const enum FieldHash {
     SpawnMaxY = 0xECCD4B38,
     SpawnMaxZ = 0x75C41A82,
     FadeInEnd = 0x806CB369,
+    // 2 = alpha blended, 0 and 4 = additive (fire, sparks).
+    RenderType = 0x24842ADA,
+    RotOffsetMin = 0x369C6B6E,
+    RotOffsetMax = 0x0A915437,
 }
 
 const partHash = (name: string) => CRC32.str(name) >>> 0;
@@ -93,6 +99,8 @@ function partToEmitter(record: StrRecord, matrix: number[], seed: number): Emitt
     const spawnZ = range(value(FieldHash.SpawnMinZ), value(FieldHash.SpawnMaxZ));
     const width = range(named('SizeMinWidth', 1), named('SizeMaxWidth', 1));
     const meanWidth = width[0] + width[1] / 2;
+    const meanHeight = (named('SizeMinHeight', meanWidth) + named('SizeMaxHeight', named('SizeMinHeight', meanWidth))) / 2;
+    const rotOffset = range(value(FieldHash.RotOffsetMin), value(FieldHash.RotOffsetMax));
     const endScale = named('SizeEndScale', 1);
     const spin = range(value(FieldHash.SpinMin), value(FieldHash.SpinMax));
     const color = (prefix: string): [number, number, number] => ['R', 'G', 'B'].map((c) =>
@@ -100,7 +108,7 @@ function partToEmitter(record: StrRecord, matrix: number[], seed: number): Emitt
     const startAlpha = Math.min((named('AlphaStart', 128) + named('AlphaStartMax', named('AlphaStart', 128))) / 2 / 128, 1);
     const endAlpha = Math.min(named('AlphaEnd', 0) / 128, 1);
     const start = color('ColorStart'), end = color('ColorEnd');
-    const renderType = named('RenderType', 2);
+    const renderType = value(FieldHash.RenderType, 2);
     const fadeOutStart = named('FadeOutStart', 1);
 
     return {
@@ -116,7 +124,8 @@ function partToEmitter(record: StrRecord, matrix: number[], seed: number): Emitt
         sizeVelBase: meanWidth * (endScale - 1) / life, sizeVelVariance: 0,
         sizeAccBase: 0, sizeAccVariance: 0,
         rotate: true,
-        rotBase: 0, rotVariance: Math.PI * 2,
+        // Upright sprites with a small random tilt; flames would fan out with random angles.
+        rotBase: rotOffset[0], rotVariance: rotOffset[1],
         rotVelBase: spin[0], rotVelVariance: spin[1],
         rotAccBase: 0, rotAccVariance: 0,
         colorKeys: [{ time: 0, color: [...start, startAlpha] }, { time: 1, color: [...end, endAlpha] }],
@@ -126,6 +135,7 @@ function partToEmitter(record: StrRecord, matrix: number[], seed: number): Emitt
         // The game advances this effect clock by 2 ticks per 60 Hz frame but converts ticks with
         // 1 / 59.94, so these effects play at twice real time.
         timeScale: 2,
+        aspect: meanWidth > 0 ? meanHeight / meanWidth : 1,
     };
 }
 
@@ -186,6 +196,7 @@ function lionToEmitter(m: Map<string, string>, matrix: number[], texture: number
         fadeIn: num(m, 'ALPHA_FADEIN'), fadeOut: m.has('ALPHA_FADEOUT') ? num(m, 'ALPHA_FADEOUT') : 1,
         scale: m.has('SCALE') ? num(m, 'SCALE') : 1,
         timeScale: 1,
+        aspect: 1,
     };
 }
 
