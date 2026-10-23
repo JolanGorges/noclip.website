@@ -154,6 +154,10 @@ void main() {
 
 const PICKUP_SPIN_RADIANS_PER_SECOND = 1.4;
 const PARTICLE_SOFT_DISTANCE = 1.5;
+// Lighting of see-through particles on indoor levels: ambient + lamp falloff.
+const PARTICLE_AMBIENT = 0.1;
+const PARTICLE_LIGHT_PEAK = 1.0;
+const PARTICLE_LIGHT_RADIUS = 3.5;
 const NEAR_PLANE = 0.1;
 const SCENE_DEPTH = 'scene-depth';
 const particleBindingLayouts: GfxBindingLayoutDescriptor[] = [{ numUniformBuffers: 2, numSamplers: 3, samplerEntries: [
@@ -237,7 +241,7 @@ export class MOHH2Renderer implements SceneGfx {
     public showCells = true;
     public lightmapScale = 1.5;
 
-    constructor(sceneContext: SceneContext, geometry: GeometryBuilder, textureInputs: Map<string, TextureInputGX>, alphaClasses: Map<string, AlphaClass>, private spawn: number[] | null, private fog: LevelFog | null, private emitters: Emitter[] = []) {
+    constructor(sceneContext: SceneContext, geometry: GeometryBuilder, textureInputs: Map<string, TextureInputGX>, alphaClasses: Map<string, AlphaClass>, private spawn: number[] | null, private fog: LevelFog | null, private emitters: Emitter[] = [], private particleLights: number[][] = []) {
         const device = sceneContext.device;
         this.renderHelper = new GfxRenderHelper(device, sceneContext);
         const cache = this.renderHelper.renderCache;
@@ -381,6 +385,18 @@ export class MOHH2Renderer implements SceneGfx {
         this.particleIndexBuffer = createBufferFromData(device, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static, indices.buffer);
     }
 
+    private particleLight(pos: ArrayLike<number>): number {
+        let k = PARTICLE_AMBIENT;
+        for (const l of this.particleLights) {
+            const d = Math.hypot(pos[0] - l[0], pos[1] - l[1], pos[2] - l[2]);
+            if (d < PARTICLE_LIGHT_RADIUS) {
+                const f = 1 - d / PARTICLE_LIGHT_RADIUS;
+                k += PARTICLE_LIGHT_PEAK * f * f;
+            }
+        }
+        return Math.min(k, 1);
+    }
+
     private submitParticles(device: GfxDevice): void {
         if (this.particleVertices === null || this.particleVertexBuffer === null || this.particleIndexBuffer === null || !this.showParticles)
             return;
@@ -390,9 +406,14 @@ export class MOHH2Renderer implements SceneGfx {
         this.emitters.forEach((e, i) => {
             const range = this.particleRanges[i];
             let n = 0;
+            const lit = !e.additive && this.particleLights.length > 0;
             forEachParticle(e, this.time, (p) => {
                 if (n >= range.capacity)
                     return;
+                if (lit) {
+                    const k = this.particleLight(p.position);
+                    p.color = [p.color[0] * k, p.color[1] * k, p.color[2] * k, p.color[3] * k];
+                }
                 const c = Math.cos(p.rotation), s = Math.sin(p.rotation), h = p.size;
                 let o = (range.firstQuad + n) * 4 * VERTEX_FLOATS;
                 for (const [cx, cy, u, w] of corners) {

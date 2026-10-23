@@ -24,7 +24,13 @@ class MOHH2SceneDesc implements SceneDesc {
         const records = parseStrRecords(str);
         const entities = parseEntities(records);
         const props = resolvePlacedModels(records, entities).map(({ placement, objects }) => ({ objects, matrix: placement.matrix, spin: placement.className === 'WeaponPowerup' }));
-        const geometry = buildLevelGeometry(files, loadSkybox(records), props, resolveBillboards(records, entities));
+        const skybox = loadSkybox(records);
+        const billboards = resolveBillboards(records, entities);
+        const geometry = buildLevelGeometry(files, skybox, props, billboards);
+        // Sewers (map 3): the game lights its smoke, so the mist only shows near the lamps. The lamps
+        // are the light glow billboards; positions converted to noclip space.
+        const indoor = /^[12]_3/.test(this.id);
+        const particleLights = indoor ? billboards.map((b) => [b.matrix[9], b.matrix[11], -b.matrix[10]]) : [];
         const textures = parseLevelTextures(records);
         const emitters = resolveEmitters(records, entities);
         const used = usedTextureNames(geometry);
@@ -32,7 +38,7 @@ class MOHH2SceneDesc implements SceneDesc {
             used.add(recordTextureName(e.texture));
         const alphaClasses = await classifyTextureAlpha(textures, used);
         const player = entities.find((e) => e.className === 'Player');
-        return new MOHH2Renderer(context, geometry, textures, alphaClasses, player !== undefined ? player.matrix : null, parseLevelFog(records), emitters);
+        return new MOHH2Renderer(context, geometry, textures, alphaClasses, player !== undefined ? player.matrix : null, parseLevelFog(records), emitters, particleLights);
     }
 }
 
